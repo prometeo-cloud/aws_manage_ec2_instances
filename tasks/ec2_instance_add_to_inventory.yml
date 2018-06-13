@@ -1,0 +1,18 @@
+---
+- name: Getting EC2 Instance facts
+  include_tasks: "ec2_instance_get_facts.yml"
+  vars:
+    ec2_instance_name: "{{ ec2_instance_hostname }}"
+
+- name: Add AWS EC2 Instance to inventory
+  add_host:
+    groups: aws
+    hostname: "{{ ec2_instance_hostname }}"
+    ansible_host: "{{ ec2_instance_ansible_host }}"
+    ansible_ssh_private_key_file: "~/.ssh/{{ key_pair_name }}.pem"
+    ansible_user: "{{ ec2_instance_ansible_user | default((ec2_user)) }}"
+    ansible_port: 22
+    become: "yes"
+    connection: "ssh"
+  changed_when: False
+...

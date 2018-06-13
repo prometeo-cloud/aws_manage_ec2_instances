@@ -1,0 +1,30 @@
+---
+- name: Add EC2 Instance to inventory
+  include_tasks: "ec2_instance_add_to_inventory.yml"
+  vars:
+    ec2_instance_hostname: "{{ ec2_instance.name }}"
+    ec2_instance_ansible_host: "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+    key_pair_name: "{{ ec2_instance.key_pair_name }}"
+  when: groups.aws.find((ec2_instance.name)) != 0
+
+- name: Generate ssh keys for {{ user_name }} user
+  user:
+    name: "{{ user_name }}"
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+  become: yes
+  delegate_to: "{{ ec2_instance.name }}"
+
+- name: Fetch {{ user_name }} user public key for {{ ec2_instance.name }}
+  fetch:
+    src: "/home/{{ user_name }}/.ssh/id_rsa.pub"
+    dest: "/tmp/"
+    flat: yes
+  become: yes
+  become_user: root
+  delegate_to: "{{ ec2_instance.name }}"
+
+- name: Move ssh public key to .ssh folder
+  command: "mv -f /tmp/id_rsa.pub ~/.ssh/{{ user_name }}:{{ (ec2_instance.name | lower) | replace(' ', '-') }}.pub"
+...

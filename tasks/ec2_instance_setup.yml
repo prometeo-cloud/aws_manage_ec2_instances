@@ -1,0 +1,26 @@
+---
+- block:
+    - name: Remove {{ ec2_instance.name }} DNS name from ~/.ssh/known_hosts
+      lineinfile:
+        dest: "~/.ssh/known_hosts"
+        regexp: "^(.*){{ item }}(.*)"
+        state: absent
+      with_items:
+        - "{{ ec2_instance.dns_name }}"
+        - "{{ ec2_result.instances[0].private_ip }}"
+
+    - name: Update {{ ec2_instance.name }} entry in /etc/hosts
+      lineinfile:
+        dest: "/etc/hosts"
+        regexp: "^(.*){{ ec2_instance.dns_name }}(.*)"
+        line: "{{ ec2_result.instances[0].private_ip }}    {{ ec2_instance.dns_name }}"
+      become: yes
+  when: ec2_instance.dns_name is defined
+
+- name: Bootstrap EC2 Instance
+  include_tasks: "ec2_instance_bootstrap.yml"
+  vars:
+    bootstrap_user: "{{ ec2_user }}"
+    bootstrap_hostname: "{{ ec2_instance.name }}"
+    bootstrap_ansible_host: "{{ ec2_result.instances[0].private_ip }}"
+...

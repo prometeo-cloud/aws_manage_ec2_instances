@@ -1,0 +1,15 @@
+---
+- name: Launch EC2 Instances
+  include_tasks: ec2_instance_launch.yml
+  with_items: "{{ ec2_instances }}"
+  loop_control:
+    loop_var: ec2_instance
+  when: (arg_action is not defined) or (arg_action != 'delete')
+
+- name: Terminate EC2 Instances
+  include_tasks: ec2_instance_terminate.yml
+  with_items: "{{ ec2_instances[::-1] }}"
+  loop_control:
+    loop_var: ec2_instance
+  when: (arg_action is defined) and (arg_action == 'delete')
+...

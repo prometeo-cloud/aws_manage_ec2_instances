@@ -1,0 +1,9 @@
+---
+- name: Adding users to authorized_keys file
+  authorized_key:
+    user: "{{ user_name | default((ec2_user)) }}"
+    key: "{{ lookup('file','user_keys_latest') }}"
+#    exclusive: yes     # removes any existing keys NOT in the file
+  become: yes
+  delegate_to: "{{ ec2_instance_host }}"
+...

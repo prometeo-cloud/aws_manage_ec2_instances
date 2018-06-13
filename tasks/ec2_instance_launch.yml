@@ -1,0 +1,100 @@
+---
+- name: Check to see if EC2 instance exists
+  include_tasks: "ec2_instance_get_facts.yml"
+  vars:
+    ec2_instance_name: "{{ ec2_instance.name }}"
+
+- name: Launch EC2 Instance
+  block:
+    - name: Get Subnet ID
+      block:
+        - name: Get subnet facts
+          include_role:
+             name: "aws_manage_subnets"
+             tasks_from: "get_subnet_facts"
+          vars:
+            subnet_tag: "{{ ec2_instance.subnet_tag }}"
+
+        - name: Get subnet ID
+          set_fact:
+            subnet_id: "{{ subnet_facts.subnets[0].id }}"
+      when: ec2_instance.subnet_tag is defined
+
+    - name: Set resource name
+      set_fact:
+        resource_name: "{{ ec2_instance.name | upper }}"
+
+    # Key pair must be created before EC2 Instance
+    - name: Create EC2 Instance key pair
+      include_tasks: "ec2_key_pair_create.yml"
+      vars:
+        key_pair_name: "{{ ec2_instance.key_pair_name }}"
+        key_pair_region: "{{ ec2_instance.region }}"
+      when: ec2_instance.key_pair_name is defined
+
+    - name: Launch EC2 Instance {{ ec2_instance.name }} (wait for instance to start)
+      ec2:
+        aws_access_key: "{{ aws_access_key | default(omit) }}"
+        aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+        assign_public_ip: "{{ ec2_instance.assign_public_ip | default('no') }}"
+        count: "{{ ec2_instance.count | default(1) }}"
+        group: "{{ (ec2_instance.groups | default(omit)) }}"
+        image: "{{ ec2_instance.image }}"
+        instance_profile_name: "{{ ec2_instance.instance_profile_name | default(omit) }}"
+        instance_tags: "{{ resource_tags }}"
+        instance_type: "{{ ec2_instance.type | default('t2.micro') }}"
+        key_name: "{{ ec2_instance.key_pair_name | default(omit) }}"
+        monitoring: "{{ ec2_instance.monitoring | default('no') }}"
+        region: "{{ ec2_instance.region }}"
+        termination_protection: "{{ ec2_instance.termination_protection | default('yes') }}"
+        volumes: "{{ ec2_instance.volumes | default(omit) }}"
+        vpc_subnet_id: "{{ subnet_id | default(omit) }}"
+        wait: yes
+        wait_timeout: 900
+        zone: "{{ ec2_instance.zone | default(omit) }}"
+      when: ec2_instance.user_data is not defined
+      register: ec2_result
+
+    - name: Launch EC2 Instance {{ ec2_instance.name }} (wait for instance to start)
+      ec2:
+        aws_access_key: "{{ aws_access_key | default(omit) }}"
+        aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+        assign_public_ip: "{{ ec2_instance.assign_public_ip | default('no') }}"
+        count: "{{ ec2_instance.count | default(1) }}"
+        group: "{{ (ec2_instance.groups | default(omit)) }}"
+        image: "{{ ec2_instance.image }}"
+        instance_profile_name: "{{ ec2_instance.instance_profile_name | default(omit) }}"
+        instance_tags: "{{ resource_tags }}"
+        instance_type: "{{ ec2_instance.type | default('t2.micro') }}"
+        key_name: "{{ ec2_instance.key_pair_name | default(omit) }}"
+        monitoring: "{{ ec2_instance.monitoring | default('no') }}"
+        region: "{{ ec2_instance.region }}"
+        termination_protection: "{{ ec2_instance.termination_protection | default('yes') }}"
+        user_data:  "{{ lookup('file', ec2_instance.user_data) }}"
+        volumes: "{{ ec2_instance.volumes | default(omit) }}"
+        vpc_subnet_id: "{{ subnet_id | default(omit) }}"
+        wait: yes
+        wait_timeout: 900
+        zone: "{{ ec2_instance.zone | default(omit) }}"
+      when: ec2_instance.user_data is defined
+      register: ec2_result
+
+    - name: Delay for instance to finish initialising
+      pause:
+        seconds: 15
+  when: ec2_instance_facts.instances == []
+
+# Note: moved task calls here as Ansible Engine 2.5.0 or greater skips them.
+- name: Set EC2 Instance up as a Jump Box (includes bootstrap)
+  include_tasks: "ec2_jumpbox_setup.yml"
+  when:
+    - ec2_instance_facts.instances == []
+    - ec2_instance.jumpbox is defined and ec2_instance.jumpbox == "yes"
+
+# Note: moved task calls here as Ansible Engine 2.5.0 or greater skips them.
+- name: Set EC2 Instance up
+  include_tasks: "ec2_instance_setup.yml"
+  when:
+    - ec2_instance_facts.instances == []
+    - ec2_instance.jumpbox is not defined
+...

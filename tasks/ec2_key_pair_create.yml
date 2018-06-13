@@ -1,0 +1,16 @@
+---
+- name: Create EC2 key pair {{ key_pair_name }}
+  ec2_key:
+    aws_access_key: "{{ aws_access_key | default(omit) }}"
+    aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+    name: "{{ key_pair_name }}"
+    region: "{{ key_pair_region }}"
+  register: aws_key_pair
+
+- name: Save EC2 key pair PEM file
+  copy:
+    dest: "~/.ssh/{{ key_pair_name }}.pem"
+    content: "{{ aws_key_pair.key.private_key }}"
+    mode: 0400
+  when: aws_key_pair.msg != "key pair already exists"
+...

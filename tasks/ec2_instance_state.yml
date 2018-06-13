@@ -1,0 +1,11 @@
+---
+- name: Change EC2 Instance {{ ec2_instance_name }} state - {{ instance_state }}
+  ec2:
+    aws_access_key: "{{ aws_access_key | default(omit) }}"
+    aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+    region: "{{ ec2_instance.region }}"
+    instance_tags:
+      Name: "{{ ec2_instance_name | upper }}"
+    state: "{{ instance_state }}"
+    wait: True
+...

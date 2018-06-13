@@ -1,0 +1,78 @@
+---
+- name: Add EC2 Instance to inventory
+  include_tasks: "ec2_instance_add_to_inventory.yml"
+  vars:
+    ec2_instance_hostname: "{{ bootstrap_hostname }}"
+    ec2_instance_ansible_host: "{{ bootstrap_ansible_host }}"
+    key_pair_name: "{{ ec2_instance.key_pair_name }}"
+    ec2_instance_ansible_user: "{{ ec2_user }}"
+  when: (groups.aws | to_json ).find((bootstrap_hostname)) == -1
+
+- name: Check EC2 Instance OS
+  command: "aws ec2 describe-instances --instance-ids {{ ec2_instance_facts.instances[0].instance_id }} --query 'Reservations[*].Instances[*].[Platform]' --output text"
+  changed_when: False
+  register: result
+
+- name: Bootstrap RHEL instances
+  block:
+    - block:
+        - name: Set {{ ec2_instance.name }} host name
+          hostname:
+            name: "{{ ec2_instance.dns_name }}"
+          become: yes
+          delegate_to: "{{ bootstrap_hostname }}"
+
+        - name: Wait until the file /etc/cloud/cloud.cfg is present before continuing
+          wait_for:
+            path: "/etc/cloud/cloud.cfg"
+          become: yes
+          delegate_to: "{{ bootstrap_hostname }}"
+
+        - name: Preserve hostname
+          lineinfile:
+            path: "/etc/cloud/cloud.cfg"
+            line: "preserve_hostname: true"
+            state: present
+          become: yes
+          delegate_to: "{{ bootstrap_hostname }}"
+      when: ec2_instance.set_hostname is defined and ec2_instance.set_hostname == True
+
+    - name: Register EC2 Instance
+      command: 'subscription-manager register --org="{{ organisation }}" --activationkey={{ activation_key }}'
+      become: yes
+      ignore_errors: True
+      delegate_to: "{{ bootstrap_hostname }}"
+      when: organisation is defined and activation_key is defined
+
+    - name: Set timezone to London (GB)
+      timezone:
+        name: Europe/London
+      become: yes
+      delegate_to: "{{ bootstrap_hostname }}"
+
+    - name: Add authorised users to {{ bootstrap_hostname }}
+      include_tasks: ec2_authorised_user_add.yml
+      vars:
+        user_name: "{{ bootstrap_user }}"
+        ec2_instance_host: "{{ bootstrap_hostname }}"
+
+    - name: Create Ansible Control Node
+      include_tasks: ec2_instance_ansible_control_node.yml
+      when: ec2_instance.ansible_control_node is defined and ec2_instance.ansible_control_node == "yes"
+
+    - name: Reboot {{ ec2_instance.name }}
+      include_tasks: "ec2_instance_state.yml"
+      vars:
+        ec2_instance_name: "{{ ec2_instance.name }}"
+        instance_state: "restarted"
+      become: yes
+      delegate_to: "{{ bootstrap_hostname }}"
+      when: ec2_instance.set_hostname is defined and ec2_instance.set_hostname == True
+  when: result.stdout == "None"
+
+- block:
+    - name: Bootstrap Windows instances
+      debug:
+        msg: "To be defined..."
+  when: result.stdout != "None"
+...

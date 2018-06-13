@@ -1,0 +1,28 @@
+---
+- name: Check for Red Hat subscription
+  command: "subscription-manager list"
+  changed_when: False
+  become: yes
+  register: subscription
+  delegate_to: "{{ bootstrap_hostname }}"
+
+- block:
+    - name: Enable Ansible repository
+      command: "subscription-manager repos --enable {{ ansible_repo }}"
+      become: yes
+      delegate_to: "{{ bootstrap_hostname }}"
+
+    - name: Install Ansible and Git
+      yum:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - ansible
+        - git
+      become: yes
+      delegate_to: "{{ bootstrap_hostname }}"
+
+    - name: Copy {{ ec2_instance.key_pair_name }} key pair to Control Node
+      command: "scp /home/{{ ansible_user }}/.ssh/{{ ec2_instance.key_pair_name }}.pem {{ ec2_user}}@{{ ec2_result.instances[0].private_ip }}:/home/{{ ec2_user }}/.ssh/{{ ec2_instance.key_pair_name }}.pem"
+  when: subscription.stdout.find('Subscribed') != -1 and ec2_instance.ansible_control_node == "yes"
+...

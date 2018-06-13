@@ -1,0 +1,94 @@
+---
+- name: Allocate Elastic IP
+  ec2_eip:
+    aws_access_key: "{{ aws_access_key | default(omit) }}"
+    aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+    region: "{{ ec2_instance.region }}"
+    device_id: "{{ ec2_result.instances[0].id }}"
+    private_ip_address: "{{ ec2_result.instances[0].private_ip }}"
+  when: ec2_instance.assign_public_ip is not defined
+
+- name: Add EC2 Instance to inventory
+  include_tasks: "ec2_instance_add_to_inventory.yml"
+  vars:
+    ec2_instance_hostname: "{{ ec2_instance.name }}"
+    ec2_instance_ansible_host: "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+    key_pair_name: "{{ ec2_instance.key_pair_name }}"
+    ec2_instance_ansible_user: "{{ ec2_user }}"
+
+- name: Create {{ jumpbox_user }} user
+  user:
+    name: "{{ jumpbox_user }}"
+    shell: /sbin/nologin
+  become: yes
+  delegate_to: "{{ ec2_instance.name }}"
+
+- name: Generate ssh key
+  include_tasks: "ec2_jumpbox_ssh_key_generate.yml"
+  vars:
+    user_name: "{{ jumpbox_user }}"
+    ec2_instance_name: "{{ ec2_instance.name }}"
+    key_pair_name: "{{ ec2_instance.key_pair_name }}"
+
+- name: Copy {{ ec2_user }} authorized_keys to {{ jumpbox_user }}
+  copy:
+    src: "/home/{{ ec2_user }}/.ssh/authorized_keys"
+    dest: "/home/{{ jumpbox_user }}/.ssh/authorized_keys"
+    owner: "{{ jumpbox_user }}"
+    group: "{{ jumpbox_user }}"
+    remote_src: yes
+  delegate_to: "{{ ec2_instance.name }}"
+  become: yes
+
+- name: Set up Jump Box ssh for localhost
+  block:
+    - name: Remove {{ ec2_instance.name }} DNS name from ~/.ssh/known_hosts
+      lineinfile:
+        dest: "~/.ssh/known_hosts"
+        regexp: "^(.*){{ item }}(.*)"
+        state: absent
+      with_items:
+        - "{{ ec2_instance.dns_name }}"
+
+    - name: Update {{ ec2_instance.name }} entry in /etc/hosts
+      lineinfile:
+        dest: "/etc/hosts"
+        regexp: "^(.*){{ ec2_instance.dns_name }}(.*)"
+        line: "{{ ec2_instance_facts.instances[0].public_ip_address }}    {{ ec2_instance.dns_name }}"
+      become: yes
+  when: ec2_instance.dns_name is defined
+
+- name: Remove {{ ec2_instance.name }} IP from ~/.ssh/known_hosts
+  lineinfile:
+    dest: "~/.ssh/known_hosts"
+    regexp: "^(.*){{ item }}(.*)"
+    state: absent
+  with_items:
+    - "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+
+- name: Update SSH daemon configuration
+  lineinfile:
+    dest: "/etc/ssh/sshd_config"
+    regexp: "(.*){{ item.old_option }}(.*)"
+    line: "{{ item.new_option }}"
+  with_items:
+    - { old_option: "#PermitRootLogin yes", new_option: "PermitRootLogin no" }
+    - { old_option: "#PasswordAuthentication yes", new_option: "PasswordAuthentication no" }
+    - { old_option: "#AllowAgentForwarding yes", new_option: "AllowAgentForwarding yes" }
+  delegate_to: "{{ ec2_instance.name }}"
+  become: yes
+
+- name: Restart SSH Daemon
+  service:
+    name: sshd
+    state: restarted
+  delegate_to: "{{ ec2_instance.name }}"
+  become: yes
+
+- name: Bootstrap EC2 Instance
+  include_tasks: "ec2_instance_bootstrap.yml"
+  vars:
+    bootstrap_user: "{{ jumpbox_user }}"
+    bootstrap_hostname: "{{ ec2_instance.name }}"
+    bootstrap_ansible_host: "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+...

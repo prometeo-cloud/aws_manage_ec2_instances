@@ -1,0 +1,84 @@
+---
+- name: Get EC2 Instance {{ ec2_instance.name }} facts
+  include_tasks: "ec2_instance_get_facts.yml"
+  vars:
+    ec2_instance_name: "{{ ec2_instance.name }}"
+
+- block:
+    - name: Check EC2 Instance OS
+      command: "aws ec2 describe-instances --instance-ids {{ ec2_instance_facts.instances[0].instance_id }} --query 'Reservations[*].Instances[*].[Platform]' --output text"
+      changed_when: False
+      register: os_type
+
+    - name: Remove any Red Hat subscriptions
+      block:
+        - name: Add EC2 Instance to inventory(using public IP address)
+          include_tasks: "ec2_instance_add_to_inventory.yml"
+          vars:
+            ec2_instance_hostname: "{{ ec2_instance.name }}"
+            ec2_instance_ansible_host: "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+            key_pair_name: "{{ ec2_instance.key_pair_name }}"
+            ec2_instance_ansible_user: "{{ ec2_user }}"
+          when: ec2_instance_facts.instances[0].public_ip_address is defined and ec2_instance.jumpbox == "yes"
+
+        - name: Add EC2 Instance to inventory (using private IP address)
+          include_tasks: "ec2_instance_add_to_inventory.yml"
+          vars:
+            ec2_instance_hostname: "{{ ec2_instance.name }}"
+            ec2_instance_ansible_host: "{{ ec2_instance_facts.instances[0].private_ip_address }}"
+            key_pair_name: "{{ ec2_instance.key_pair_name }}"
+            ec2_instance_ansible_user: "{{ ec2_user }}"
+          when: ec2_instance.jumpbox is not defined
+
+        - name: Remove all subscriptions
+          command: "subscription-manager remove --all"
+          register: unsub
+          changed_when: unsub.stdout != "0 subscriptions removed from this system."
+          failed_when: False
+          become: yes
+          delegate_to: "{{ ec2_instance.name }}"
+
+        - name: Display subscriptions removal result
+          debug: var=unsub.stdout_lines
+
+        - name: Unregister EC2 Instance
+          command: "subscription-manager unregister"
+          register: unreg
+          failed_when: False
+          changed_when: unreg.stdout != ""
+          become: yes
+          delegate_to: "{{ ec2_instance.name }}"
+
+        - name: Display unregister EC2 Instance result
+          debug: var=unreg.stdout_lines
+      when: os_type.stdout == "None"
+  when: ec2_instance_facts.instances != []
+
+- block:
+    - name: Disassociate EIP from the EC2 instance
+      ec2_eip:
+        aws_access_key: "{{ aws_access_key | default(omit) }}"
+        aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+        device_id: "{{ ec2_instance_facts.instances[0].instance_id }}"
+        ip: "{{ ec2_instance_facts.instances[0].public_ip_address }}"
+        region: "{{ ec2_instance.region }}"
+        release_on_disassociation: yes
+        state: absent
+
+    - name: Remove {{ ec2_instance.name }} entry from ~/.ssh/known_hosts
+      lineinfile:
+        dest: "~/.ssh/known_hosts"
+        regexp: "^(.*){{ ec2_instance_facts.instances[0].public_ip_address }}(.*)"
+        state: absent
+  when: ec2_instance_facts.instances != [] and ec2_instance_facts.instances[0].public_ip_address is defined
+
+- name: Terminate EC2 Instance {{ ec2_instance.name }}
+  ec2:
+    aws_access_key: "{{ aws_access_key | default(omit) }}"
+    aws_secret_key: "{{ aws_secret_key | default(omit) }}"
+    region: "{{ ec2_instance.region | default(aws_region) }}"
+    instance_ids: "{{ ec2_instance_facts.instances[0].instance_id }}"
+    state: "absent"
+    wait: yes
+  when: ec2_instance_facts.instances != []
+...
